@@ -7,8 +7,12 @@ BS_CONTAINER_NAME := blockscout
 PG_CONTAINER_IMAGE := postgres:14
 PG_CONTAINER_NAME := db
 THIS_FILE = $(lastword $(MAKEFILE_LIST))
-TAG := $(RELEASE_VERSION)-prerelease-$(shell git log -1 --pretty=format:"%h")
 STABLE_TAG := $(RELEASE_VERSION)
+BRANCH?=$(shell git rev-parse --abbrev-ref HEAD | sed -e 's/develop_dojima/testnet/g;')
+BUILDTAG?=$(shell git rev-parse --abbrev-ref HEAD | sed -e 's/master_dojima/mainnet/g;s/develop_dojima/testnet/g;')
+GITREF=$(shell git rev-parse --short HEAD)
+VERSION=$(shell cat version)
+TAG=$(shell date +%Y-%m-%d)
 
 ifeq ($(SYSTEM), Linux)
 	HOST=localhost
@@ -700,3 +704,21 @@ tag-stable-version: ## Generate container `{version}` tag
 				tag-latest \
 				tag-version
 
+region-check:
+	@if [ -z "${REGION}" ]; then\
+        	echo "add region env variable";\
+        	exit 1;\
+    fi
+
+ecr-check:
+	@if [ -z "${ECR}" ]; then\
+    		echo "add ecr env variable";\
+    		exit 1;\
+    fi
+aws-github-push: ecr-check region-check
+	docker tag ${ECR}:${GITREF} ${ECR}:${BRANCH}-${VERSION}-${TAG}
+	docker push ${ECR}:${BRANCH}-${VERSION}-${TAG}
+
+aws-github-build: region-check ecr-check
+	docker build -f ./Dockerfile $(shell sh ./semver_tags.sh ${ECR} ${BRANCH} $(shell cat version)) -t ${ECR}:${GITREF} .
+# ------------------------------------------------------------------ #
