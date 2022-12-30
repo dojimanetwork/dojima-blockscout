@@ -2,7 +2,6 @@ SYSTEM := $(shell uname -s)
 HOST := host.docker.internal
 DOCKER_REPO := blockscout
 APP_NAME := blockscout
-BS_CONTAINER_IMAGE := $(DOCKER_REPO)/$(APP_NAME)
 BS_CONTAINER_NAME := blockscout
 PG_CONTAINER_IMAGE := postgres:14
 PG_CONTAINER_NAME := db
@@ -13,6 +12,7 @@ BUILDTAG?=$(shell git rev-parse --abbrev-ref HEAD | sed -e 's/master_dojima/main
 GITREF=$(shell git rev-parse --short HEAD)
 VERSION=$(shell cat version)
 TAG=$(shell date +%Y-%m-%d)
+BS_CONTAINER_IMAGE := ${ECR}:${GITREF}
 
 ifeq ($(SYSTEM), Linux)
 	HOST=localhost
@@ -574,7 +574,7 @@ ifdef AMPLITUDE_URL
 endif
 
 
-HAS_BLOCKSCOUT_IMAGE := $(shell docker images | grep -sw "${BS_CONTAINER_IMAGE} ")
+HAS_BLOCKSCOUT_IMAGE := $(shell docker images | grep -sw "${ECR}:${GITREF}")
 build:
 	@echo "==> Checking for blockscout image $(BS_CONTAINER_IMAGE)"
 ifdef HAS_BLOCKSCOUT_IMAGE
@@ -720,5 +720,11 @@ aws-github-push: ecr-check region-check
 	docker push ${ECR}:${BRANCH}-${VERSION}-${TAG}
 
 aws-github-build: region-check ecr-check
-	docker build -f ./Dockerfile $(shell sh ./semver_tags.sh ${ECR} ${BRANCH} $(shell cat version)) -t ${ECR}:${GITREF} .
+	@echo "==> Checking for blockscout image $(BS_CONTAINER_IMAGE)"
+ifdef HAS_BLOCKSCOUT_IMAGE
+	@echo "==> Image exist. Using $(BS_CONTAINER_IMAGE)"
+else
+	@echo "==> No image found, trying to build one..."
+	@docker build -f ./Dockerfile $(shell sh ./semver_tags.sh ${ECR} ${BRANCH} $(shell cat version)) -t ${ECR}:${GITREF} ../
+endif
 # ------------------------------------------------------------------ #
