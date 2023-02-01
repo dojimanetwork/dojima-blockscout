@@ -35,9 +35,8 @@
  <div class="col-xs-12 col-md-4 col-lg-<%= col_size %> footer-list">
         <h3>BlockScout</h3>
         <ul>
-          <%= if Application.get_env(:block_scout_web, :footer)[:enable_forum_link] do %>
-            <li><a href="<%= Application.get_env(:block_scout_web, :footer)[:forum_link] %>" rel="noreferrer" class="footer-link"><%= gettext("Forum") %></a></li>
-          <% end %>
+          <li><a href="https://wallet.dojima.network/wallet/intro" rel="noreferrer" class="footer-link" target="_blank"><%= gettext("Wallet") %></a></li>
+          <li><a href="https://devoc-test.dojima.network" rel="noreferrer" class="footer-link"><%= gettext("Dojima Docs") %></a></li>
           <%= render BlockScoutWeb.LayoutView, "_add_chain_to_mm.html" %>
         </ul>
       </div>
