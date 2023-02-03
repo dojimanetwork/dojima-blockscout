@@ -710,6 +710,10 @@ region-check:
         	exit 1;\
     fi
 
+pull: ## Git pull repository
+	@git clean -idf
+	@git pull origin $(shell git rev-parse --abbrev-ref HEAD)
+
 ecr-check:
 	@if [ -z "${ECR}" ]; then\
     		echo "add ecr env variable";\
@@ -719,7 +723,7 @@ aws-github-push: ecr-check region-check
 	docker tag ${ECR}:${GITREF} ${ECR}:${BRANCH}-${VERSION}-${TAG}
 	docker push ${ECR}:${BRANCH}-${VERSION}-${TAG}
 
-aws-github-build: region-check ecr-check
+aws-github-build: region-check ecr-check pull
 	@echo "==> Checking for blockscout image $(BS_CONTAINER_IMAGE)"
 ifdef HAS_BLOCKSCOUT_IMAGE
 	@echo "==> Image exist. Using $(BS_CONTAINER_IMAGE)"
