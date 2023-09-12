@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  ethereum:
+    container_name: 'eth'
+    image: ethereum/client-go:v1.10.16
+    restart: unless-stopped
+    environment:
+      ETH_BLOCK_TIME: ${ETH_BLOCK_TIME:-5}
+    ports:
+      - 9545:9545
+      - 30301:30301
+      - 30304:30303
+    volumes:
+      - "../eth:/docker/scripts"
+    entrypoint: /docker/scripts/start-mock.sh
