@@ -5,7 +5,7 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
 
   require Ecto.Query
 
-  import Ecto.Query, only: [from: 2, subquery: 1]
+  import Ecto.Query, only: [from: 2, where: 3, subquery: 1]
 
   alias Ecto.{Changeset, Multi, Repo}
   alias Explorer.Chain.{Address, Block, Import, PendingBlockOperation, Transaction}
@@ -15,7 +15,7 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
   alias Explorer.Chain.Import.Runner.Tokens
   alias Explorer.Prometheus.Instrumenter
   alias Explorer.Repo, as: ExplorerRepo
-  alias Explorer.Utility.MissingBlockRange
+  alias Explorer.Utility.MissingRangesManipulator
 
   @behaviour Runner
 
@@ -51,14 +51,11 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
 
     minimal_block_height = trace_minimal_block_height()
 
-    hashes_for_pending_block_operations =
-      if minimal_block_height > 0 do
-        changes_list
-        |> Enum.filter(&(&1.number >= minimal_block_height))
-        |> Enum.map(& &1.hash)
-      else
-        hashes
-      end
+    items_for_pending_ops =
+      changes_list
+      |> filter_by_min_height(&(&1.number >= minimal_block_height))
+      |> Enum.filter(& &1.consensus)
+      |> Enum.map(&{&1.number, &1.hash})
 
     consensus_block_numbers = consensus_block_numbers(changes_list)
 
@@ -66,16 +63,7 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
     run_func = fn repo ->
       {:ok, nonconsensus_items} = lose_consensus(repo, hashes, consensus_block_numbers, changes_list, insert_options)
 
-      nonconsensus_hashes =
-        if minimal_block_height > 0 do
-          nonconsensus_items
-          |> Enum.filter(fn {number, _hash} -> number >= minimal_block_height end)
-          |> Enum.map(fn {_number, hash} -> hash end)
-        else
-          hashes
-        end
-
-      {:ok, nonconsensus_hashes}
+      {:ok, filter_by_min_height(nonconsensus_items, fn {number, _hash} -> number >= minimal_block_height end)}
     end
 
     multi
@@ -98,10 +86,10 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
         :blocks
       )
     end)
-    |> Multi.run(:new_pending_operations, fn repo, %{lose_consensus: nonconsensus_hashes} ->
+    |> Multi.run(:new_pending_operations, fn repo, %{lose_consensus: nonconsensus_items} ->
       Instrumenter.block_import_stage_runner(
         fn ->
-          new_pending_operations(repo, nonconsensus_hashes, hashes_for_pending_block_operations, insert_options)
+          new_pending_operations(repo, nonconsensus_items, items_for_pending_ops, insert_options)
         end,
         :address_referencing,
         :blocks,
@@ -161,25 +149,17 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
         :derive_transaction_forks
       )
     end)
-    |> Multi.run(:acquire_contract_address_tokens, fn repo, _ ->
+    |> Multi.run(:delete_address_token_balances, fn repo, %{lose_consensus: non_consensus_blocks} ->
       Instrumenter.block_import_stage_runner(
-        fn -> acquire_contract_address_tokens(repo, consensus_block_numbers) end,
-        :address_referencing,
-        :blocks,
-        :acquire_contract_address_tokens
-      )
-    end)
-    |> Multi.run(:delete_address_token_balances, fn repo, _ ->
-      Instrumenter.block_import_stage_runner(
-        fn -> delete_address_token_balances(repo, consensus_block_numbers, insert_options) end,
+        fn -> delete_address_token_balances(repo, non_consensus_blocks, insert_options) end,
         :address_referencing,
         :blocks,
         :delete_address_token_balances
       )
     end)
-    |> Multi.run(:delete_address_current_token_balances, fn repo, _ ->
+    |> Multi.run(:delete_address_current_token_balances, fn repo, %{lose_consensus: non_consensus_blocks} ->
       Instrumenter.block_import_stage_runner(
-        fn -> delete_address_current_token_balances(repo, consensus_block_numbers, insert_options) end,
+        fn -> delete_address_current_token_balances(repo, non_consensus_blocks, insert_options) end,
         :address_referencing,
         :blocks,
         :delete_address_current_token_balances
@@ -217,19 +197,6 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
   @impl Runner
   def timeout, do: @timeout
 
-  defp acquire_contract_address_tokens(repo, consensus_block_numbers) do
-    query =
-      from(ctb in Address.CurrentTokenBalance,
-        where: ctb.block_number in ^consensus_block_numbers,
-        select: {ctb.token_contract_address_hash, ctb.token_id},
-        distinct: [ctb.token_contract_address_hash, ctb.token_id]
-      )
-
-    contract_address_hashes_and_token_ids = repo.all(query)
-
-    Tokens.acquire_contract_address_tokens(repo, contract_address_hashes_and_token_ids)
-  end
-
   defp fork_transactions(%{
          repo: repo,
          timeout: timeout,
@@ -242,7 +209,7 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
         select: transaction,
         # Enforce Transaction ShareLocks order (see docs: sharelocks.md)
         order_by: [asc: :hash],
-        lock: "FOR UPDATE"
+        lock: "FOR NO KEY UPDATE"
       )
 
     update_query =
@@ -381,14 +348,14 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
       }) do
     acquire_query =
       from(
-        block in where_invalid_neighbour(changes_list),
+        block in where_invalid_neighbor(changes_list),
         or_where: block.number in ^consensus_block_numbers,
         # we also need to acquire blocks that will be upserted here, for ordering
         or_where: block.hash in ^hashes,
         select: block.hash,
         # Enforce Block ShareLocks order (see docs: sharelocks.md)
         order_by: [asc: block.hash],
-        lock: "FOR UPDATE"
+        lock: "FOR NO KEY UPDATE"
       )
 
     {_, removed_consensus_block_hashes} =
@@ -407,7 +374,8 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
 
     removed_consensus_block_hashes
     |> Enum.map(fn {number, _hash} -> number end)
-    |> MissingBlockRange.add_ranges_by_block_numbers()
+    |> Enum.reject(&Enum.member?(consensus_block_numbers, &1))
+    |> MissingRangesManipulator.add_ranges_by_block_numbers()
 
     {:ok, removed_consensus_block_hashes}
   rescue
@@ -428,7 +396,7 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
     EthereumJSONRPC.first_block_to_fetch(:trace_first_block)
   end
 
-  defp new_pending_operations(repo, nonconsensus_hashes, hashes, %{
+  defp new_pending_operations(repo, nonconsensus_items, items, %{
          timeout: timeout,
          timestamps: timestamps
        }) do
@@ -436,12 +404,12 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
       {:ok, []}
     else
       sorted_pending_ops =
-        nonconsensus_hashes
+        items
         |> MapSet.new()
-        |> MapSet.union(MapSet.new(hashes))
+        |> MapSet.difference(MapSet.new(nonconsensus_items))
         |> Enum.sort()
-        |> Enum.map(fn hash ->
-          %{block_hash: hash}
+        |> Enum.map(fn {number, hash} ->
+          %{block_hash: hash, block_number: number}
         end)
 
       Import.insert_changes_list(
@@ -459,10 +427,12 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
 
   defp delete_address_token_balances(_, [], _), do: {:ok, []}
 
-  defp delete_address_token_balances(repo, consensus_block_numbers, %{timeout: timeout}) do
+  defp delete_address_token_balances(repo, non_consensus_blocks, %{timeout: timeout}) do
+    non_consensus_block_numbers = Enum.map(non_consensus_blocks, fn {number, _hash} -> number end)
+
     ordered_query =
       from(tb in Address.TokenBalance,
-        where: tb.block_number in ^consensus_block_numbers,
+        where: tb.block_number in ^non_consensus_block_numbers,
         select: map(tb, [:address_hash, :token_contract_address_hash, :token_id, :block_number]),
         # Enforce TokenBalance ShareLocks order (see docs: sharelocks.md)
         order_by: [
@@ -494,16 +464,18 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
       {:ok, deleted_address_token_balances}
     rescue
       postgrex_error in Postgrex.Error ->
-        {:error, %{exception: postgrex_error, block_numbers: consensus_block_numbers}}
+        {:error, %{exception: postgrex_error, block_numbers: non_consensus_block_numbers}}
     end
   end
 
   defp delete_address_current_token_balances(_, [], _), do: {:ok, []}
 
-  defp delete_address_current_token_balances(repo, consensus_block_numbers, %{timeout: timeout}) do
+  defp delete_address_current_token_balances(repo, non_consensus_blocks, %{timeout: timeout}) do
+    non_consensus_block_numbers = Enum.map(non_consensus_blocks, fn {number, _hash} -> number end)
+
     ordered_query =
       from(ctb in Address.CurrentTokenBalance,
-        where: ctb.block_number in ^consensus_block_numbers,
+        where: ctb.block_number in ^non_consensus_block_numbers,
         select: map(ctb, [:address_hash, :token_contract_address_hash, :token_id]),
         # Enforce CurrentTokenBalance ShareLocks order (see docs: sharelocks.md)
         order_by: [
@@ -541,7 +513,7 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
       {:ok, deleted_address_current_token_balances}
     rescue
       postgrex_error in Postgrex.Error ->
-        {:error, %{exception: postgrex_error, block_numbers: consensus_block_numbers}}
+        {:error, %{exception: postgrex_error, block_numbers: non_consensus_block_numbers}}
     end
   end
 
@@ -569,8 +541,10 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
           address_hash: new_current_token_balance.address_hash,
           token_contract_address_hash: new_current_token_balance.token_contract_address_hash,
           token_id: new_current_token_balance.token_id,
+          token_type: tb.token_type,
           block_number: new_current_token_balance.block_number,
           value: tb.value,
+          value_fetched_at: tb.value_fetched_at,
           inserted_at: over(min(tb.inserted_at), :w),
           updated_at: over(max(tb.updated_at), :w)
         },
@@ -689,7 +663,7 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
         where: bsdr.uncle_hash in ^uncle_hashes,
         # Enforce SeconDegreeRelation ShareLocks order (see docs: sharelocks.md)
         order_by: [asc: :nephew_hash, asc: :uncle_hash],
-        lock: "FOR UPDATE"
+        lock: "FOR NO KEY UPDATE"
       )
 
     update_query =
@@ -723,25 +697,38 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
     end)
   end
 
-  defp where_invalid_neighbour(blocks_changes) when is_list(blocks_changes) do
+  defp where_invalid_neighbor(blocks_changes) when is_list(blocks_changes) do
     initial = from(b in Block, where: false)
 
-    Enum.reduce(blocks_changes, initial, fn %{
-                                              consensus: consensus,
-                                              hash: hash,
-                                              parent_hash: parent_hash,
-                                              number: number
-                                            },
-                                            acc ->
-      if consensus do
-        from(
-          block in acc,
-          or_where: block.number == ^(number - 1) and block.hash != ^parent_hash,
-          or_where: block.number == ^(number + 1) and block.parent_hash != ^hash
-        )
-      else
-        acc
-      end
-    end)
+    invalid_neighbors_query =
+      Enum.reduce(blocks_changes, initial, fn %{
+                                                consensus: consensus,
+                                                hash: hash,
+                                                parent_hash: parent_hash,
+                                                number: number
+                                              },
+                                              acc ->
+        if consensus do
+          from(
+            block in acc,
+            or_where: block.number == ^(number - 1) and block.hash != ^parent_hash,
+            or_where: block.number == ^(number + 1) and block.parent_hash != ^hash
+          )
+        else
+          acc
+        end
+      end)
+
+    where(invalid_neighbors_query, [block], block.consensus)
+  end
+
+  defp filter_by_min_height(blocks, filter_func) do
+    minimal_block_height = trace_minimal_block_height()
+
+    if minimal_block_height > 0 do
+      Enum.filter(blocks, &filter_func.(&1))
+    else
+      blocks
+    end
   end
 end
