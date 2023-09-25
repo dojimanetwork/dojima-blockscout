@@ -96,19 +96,14 @@ defmodule Explorer.Account.Notifier.Notify do
 
     email = Email.compose(notification, address)
 
-    if email do
-      case Mailer.deliver_now(email, response: true) do
-        {:ok, _email, response} ->
-          Logger.info("--- email delivery response: SUCCESS", fetcher: :account)
-          Logger.info(response, fetcher: :account)
+    case Mailer.deliver_now(email, response: true) do
+      {:ok, _email, response} ->
+        Logger.info("--- email delivery response: SUCCESS", fetcher: :account)
+        Logger.info(response, fetcher: :account)
 
-        {:error, error} ->
-          Logger.info("--- email delivery response: FAILED", fetcher: :account)
-          Logger.info(error, fetcher: :account)
-      end
-    else
-      Logger.info("--- email delivery response: FAILED", fetcher: :account)
-      Logger.info("Email is not composed (is nil)", fetcher: :account)
+      {:error, error} ->
+        Logger.info("--- email delivery response: FAILED", fetcher: :account)
+        Logger.info(error, fetcher: :account)
     end
   end
 

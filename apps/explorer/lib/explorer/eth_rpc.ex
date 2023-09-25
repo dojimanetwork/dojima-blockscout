@@ -296,14 +296,17 @@ defmodule Explorer.EthRPC do
   defp paging_options(%{
          "paging_options" => %{
            "logIndex" => log_index,
+           "transactionIndex" => transaction_index,
            "blockNumber" => block_number
          }
-       }) do
+       })
+       when is_integer(transaction_index) do
     with {:ok, parsed_block_number} <- to_number(block_number, "invalid block number"),
          {:ok, parsed_log_index} <- to_number(log_index, "invalid log index") do
       {:ok,
        %{
          log_index: parsed_log_index,
+         transaction_index: transaction_index,
          block_number: parsed_block_number
        }}
     end

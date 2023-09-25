@@ -18,8 +18,6 @@ defmodule Explorer.Application do
     GasUsage,
     MinMissingBlockNumber,
     NetVersion,
-    PendingBlockOperation,
-    StateChanges,
     Transaction,
     Transactions,
     TransactionsApiV2,
@@ -57,25 +55,22 @@ defmodule Explorer.Application do
       Explorer.SmartContract.VyperDownloader,
       {Registry, keys: :duplicate, name: Registry.ChainEvents, id: Registry.ChainEvents},
       {Admin.Recovery, [[], [name: Admin.Recovery]]},
-      Accounts,
+      Transaction,
       AddressSum,
       AddressSumMinusBurnt,
       Block,
-      BlockNumber,
       Blocks,
       GasPriceOracle,
       GasUsage,
       NetVersion,
-      PendingBlockOperation,
-      Transaction,
-      StateChanges,
-      Transactions,
-      TransactionsApiV2,
-      Uncles,
+      BlockNumber,
       con_cache_child_spec(MarketHistoryCache.cache_name()),
       con_cache_child_spec(RSK.cache_name(), ttl_check_interval: :timer.minutes(1), global_ttl: :timer.minutes(30)),
-      {Redix, redix_opts()},
-      {Explorer.Utility.MissingRangesManipulator, []}
+      Transactions,
+      TransactionsApiV2,
+      Accounts,
+      Uncles,
+      {Redix, redix_opts()}
     ]
 
     children = base_children ++ configurable_children()
@@ -88,16 +83,14 @@ defmodule Explorer.Application do
   defp configurable_children do
     [
       configure(Explorer.ExchangeRates),
-      configure(Explorer.ExchangeRates.TokenExchangeRates),
       configure(Explorer.ChainSpec.GenesisData),
+      configure(Explorer.KnownTokens),
       configure(Explorer.Market.History.Cataloger),
+      configure(Explorer.Chain.Cache.TokenExchangeRate),
       configure(Explorer.Chain.Cache.ContractsCounter),
       configure(Explorer.Chain.Cache.NewContractsCounter),
       configure(Explorer.Chain.Cache.VerifiedContractsCounter),
       configure(Explorer.Chain.Cache.NewVerifiedContractsCounter),
-      configure(Explorer.Chain.Cache.TransactionActionTokensData),
-      configure(Explorer.Chain.Cache.TransactionActionUniswapPools),
-      configure(Explorer.Chain.Cache.WithdrawalsSum),
       configure(Explorer.Chain.Transaction.History.Historian),
       configure(Explorer.Chain.Events.Listener),
       configure(Explorer.Counters.AddressesWithBalanceCounter),
@@ -115,10 +108,7 @@ defmodule Explorer.Application do
       configure(Explorer.Validator.MetadataProcessor),
       configure(Explorer.Tags.AddressTag.Cataloger),
       configure(MinMissingBlockNumber),
-      configure(TokenTransferTokenIdMigration.Supervisor),
-      configure(Explorer.Chain.Fetcher.CheckBytecodeMatchingOnDemand),
-      configure(Explorer.Chain.Fetcher.FetchValidatorInfoOnDemand),
-      sc_microservice_configure(Explorer.Chain.Fetcher.LookUpSmartContractSourcesOnDemand)
+      configure(TokenTransferTokenIdMigration.Supervisor)
     ]
     |> List.flatten()
   end
@@ -135,26 +125,37 @@ defmodule Explorer.Application do
     end
   end
 
-  defp sc_microservice_configure(process) do
-    config = Application.get_env(:explorer, Explorer.SmartContract.RustVerifierInterfaceBehaviour, [])
-
-    if config[:enabled] && config[:type] == "eth_bytecode_db" do
-      process
+  defp datadog_port do
+    if System.get_env("DATADOG_PORT") do
+      case Integer.parse(System.get_env("DATADOG_PORT")) do
+        {integer, ""} -> integer
+        _ -> 8126
+      end
     else
-      []
+      8126
     end
   end
 
-  defp datadog_port do
-    Application.get_env(:explorer, :datadog)[:port]
-  end
-
   defp spandex_batch_size do
-    Application.get_env(:explorer, :spandex)[:batch_size]
+    if System.get_env("SPANDEX_BATCH_SIZE") do
+      case Integer.parse(System.get_env("SPANDEX_BATCH_SIZE")) do
+        {integer, ""} -> integer
+        _ -> 100
+      end
+    else
+      100
+    end
   end
 
   defp spandex_sync_threshold do
-    Application.get_env(:explorer, :spandex)[:sync_threshold]
+    if System.get_env("SPANDEX_SYNC_THRESHOLD") do
+      case Integer.parse(System.get_env("SPANDEX_SYNC_THRESHOLD")) do
+        {integer, ""} -> integer
+        _ -> 100
+      end
+    else
+      100
+    end
   end
 
   defp datadog_opts do

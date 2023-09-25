@@ -4,12 +4,15 @@ defmodule BlockScoutWeb.Router do
   alias BlockScoutWeb.Plug.GraphQL
   alias BlockScoutWeb.{ApiRouter, WebRouter}
 
+  if Application.compile_env(:block_scout_web, ApiRouter)[:wobserver_enabled] do
+    forward("/wobserver", Wobserver.Web.Router)
+  end
+
   if Application.compile_env(:block_scout_web, :admin_panel_enabled) do
     forward("/admin", BlockScoutWeb.AdminRouter)
   end
 
   pipeline :browser do
-    plug(BlockScoutWeb.Plug.Logger, application: :block_scout_web)
     plug(:accepts, ["html"])
     plug(:fetch_session)
     plug(:fetch_flash)
@@ -18,7 +21,6 @@ defmodule BlockScoutWeb.Router do
   end
 
   pipeline :api do
-    plug(BlockScoutWeb.Plug.Logger, application: :api)
     plug(:accepts, ["json"])
   end
 
@@ -27,6 +29,12 @@ defmodule BlockScoutWeb.Router do
   if Application.compile_env(:block_scout_web, ApiRouter)[:reading_enabled] do
     # Needs to be 200 to support the schema introspection for graphiql
     @max_complexity 200
+
+    forward("/graphql", Absinthe.Plug,
+      schema: BlockScoutWeb.Schema,
+      analyze_complexity: true,
+      max_complexity: @max_complexity
+    )
 
     forward("/graphiql", Absinthe.Plug.GraphiQL,
       schema: BlockScoutWeb.Schema,
@@ -47,16 +55,26 @@ defmodule BlockScoutWeb.Router do
   scope "/", BlockScoutWeb do
     pipe_through(:browser)
 
-    get("/robots.txt", RobotsController, :robots)
-    get("/sitemap.xml", RobotsController, :sitemap)
     get("/api-docs", APIDocsController, :index)
     get("/eth-rpc-api-docs", APIDocsController, :eth_rpc)
   end
 
-  scope "/verify_smart_contract" do
-    pipe_through(:api)
+  url_params = Application.compile_env(:block_scout_web, BlockScoutWeb.Endpoint)[:url]
+  api_path = url_params[:api_path]
+  path = url_params[:path]
 
-    post("/contract_verifications", BlockScoutWeb.AddressContractVerificationController, :create)
+  if path != api_path do
+    scope to_string(api_path) <> "/verify_smart_contract" do
+      pipe_through(:api)
+
+      post("/contract_verifications", BlockScoutWeb.AddressContractVerificationController, :create)
+    end
+  else
+    scope "/verify_smart_contract" do
+      pipe_through(:api)
+
+      post("/contract_verifications", BlockScoutWeb.AddressContractVerificationController, :create)
+    end
   end
 
   if Application.compile_env(:block_scout_web, WebRouter)[:enabled] do

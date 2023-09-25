@@ -3,14 +3,12 @@ defmodule Explorer.Account.Notifier.ForbiddenAddress do
     Check if address is forbidden to notify
   """
 
-  import Explorer.Chain.SmartContract, only: [burn_address_hash_string: 0]
-
   @blacklist [
-    burn_address_hash_string(),
+    "0x0000000000000000000000000000000000000000",
     "0x000000000000000000000000000000000000dEaD"
   ]
 
-  alias Explorer.{AccessHelper, Repo}
+  alias Explorer.{AccessHelpers, Repo}
   alias Explorer.Chain.Token
 
   import Ecto.Query, only: [from: 2]
@@ -34,7 +32,7 @@ defmodule Explorer.Account.Notifier.ForbiddenAddress do
       is_contract(address_hash) ->
         {:error, "This address isn't personal"}
 
-      match?({:restricted_access, true}, AccessHelper.restricted_access?(to_string(address_hash), %{})) ->
+      match?({:restricted_access, true}, AccessHelpers.restricted_access?(to_string(address_hash), %{})) ->
         {:error, "This address has restricted access"}
 
       address_hash ->

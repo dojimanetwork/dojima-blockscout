@@ -27,13 +27,7 @@ config :logger, :block_scout_web,
 config :logger, :api,
   level: :debug,
   path: Path.absname("logs/prod/api.log"),
-  metadata_filter: [application: :api],
-  rotate: %{max_bytes: 52_428_800, keep: 19}
-
-config :logger, :api_v2,
-  level: :debug,
-  path: Path.absname("logs/prod/api_v2.log"),
-  metadata_filter: [application: :api_v2],
+  metadata_filter: [fetcher: :api],
   rotate: %{max_bytes: 52_428_800, keep: 19}
 
 config :block_scout_web, :captcha_helper, BlockScoutWeb.CaptchaHelper

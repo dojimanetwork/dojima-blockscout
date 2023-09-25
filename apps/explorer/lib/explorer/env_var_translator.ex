@@ -1,6 +1,6 @@
 defmodule Explorer.EnvVarTranslator do
   @moduledoc """
-  The module for transformation of environment variables
+  The module for transaformation of environment variables
   """
 
   alias Poison.Parser

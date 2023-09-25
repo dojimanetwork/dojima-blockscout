@@ -28,10 +28,7 @@ defmodule Explorer.ChainTest do
   }
 
   alias Explorer.{Chain, Etherscan}
-  alias Explorer.Chain.Address.Counters
-  alias Explorer.Chain.Cache.Block, as: BlockCache
   alias Explorer.Chain.Cache.Transaction, as: TransactionCache
-  alias Explorer.Chain.Cache.PendingBlockOperation, as: PendingBlockOperationCache
   alias Explorer.Chain.InternalTransaction.Type
 
   alias Explorer.Chain.Supply.ProofOfAuthority
@@ -47,10 +44,10 @@ defmodule Explorer.ChainTest do
   describe "remove_nonconsensus_blocks_from_pending_ops/0" do
     test "removes pending ops for nonconsensus blocks" do
       block = insert(:block)
-      insert(:pending_block_operation, block: block, block_number: block.number)
+      insert(:pending_block_operation, block: block)
 
       nonconsensus_block = insert(:block, consensus: false)
-      insert(:pending_block_operation, block: nonconsensus_block, block_number: nonconsensus_block.number)
+      insert(:pending_block_operation, block: nonconsensus_block)
 
       :ok = Chain.remove_nonconsensus_blocks_from_pending_ops()
 
@@ -60,13 +57,13 @@ defmodule Explorer.ChainTest do
 
     test "removes pending ops for nonconsensus blocks by block hashes" do
       block = insert(:block)
-      insert(:pending_block_operation, block: block, block_number: block.number)
+      insert(:pending_block_operation, block: block)
 
       nonconsensus_block = insert(:block, consensus: false)
-      insert(:pending_block_operation, block: nonconsensus_block, block_number: nonconsensus_block.number)
+      insert(:pending_block_operation, block: nonconsensus_block)
 
       nonconsensus_block1 = insert(:block, consensus: false)
-      insert(:pending_block_operation, block: nonconsensus_block1, block_number: nonconsensus_block1.number)
+      insert(:pending_block_operation, block: nonconsensus_block1)
 
       :ok = Chain.remove_nonconsensus_blocks_from_pending_ops([nonconsensus_block1.hash])
 
@@ -85,7 +82,7 @@ defmodule Explorer.ChainTest do
       start_supervised!(AddressesWithBalanceCounter)
       AddressesWithBalanceCounter.consolidate()
 
-      addresses_with_balance = Counters.count_addresses_with_balance_from_cache()
+      addresses_with_balance = Chain.count_addresses_with_balance_from_cache()
 
       assert is_integer(addresses_with_balance)
       assert addresses_with_balance == 2
@@ -101,15 +98,10 @@ defmodule Explorer.ChainTest do
       start_supervised!(AddressesCounter)
       AddressesCounter.consolidate()
 
-      addresses_with_balance = Counters.address_estimated_count()
+      addresses_with_balance = Chain.address_estimated_count()
 
       assert is_integer(addresses_with_balance)
       assert addresses_with_balance == 3
-    end
-
-    test "returns 0 on empty table" do
-      start_supervised!(AddressesCounter)
-      assert 0 == Counters.address_estimated_count()
     end
   end
 
@@ -289,7 +281,7 @@ defmodule Explorer.ChainTest do
         address: address
       )
 
-      assert Enum.count(Chain.address_to_logs(address_hash, false)) == 2
+      assert Enum.count(Chain.address_to_logs(address_hash)) == 2
     end
 
     test "paginates logs" do
@@ -300,7 +292,7 @@ defmodule Explorer.ChainTest do
         |> insert(to_address: address)
         |> with_block()
 
-      _log1 = insert(:log, transaction: transaction, index: 1, address: address, block_number: transaction.block_number)
+      log1 = insert(:log, transaction: transaction, index: 1, address: address, block_number: transaction.block_number)
 
       2..51
       |> Enum.map(fn index ->
@@ -316,11 +308,11 @@ defmodule Explorer.ChainTest do
 
       paging_options1 = %PagingOptions{page_size: 1}
 
-      [_log] = Chain.address_to_logs(address_hash, false, paging_options: paging_options1)
+      [_log] = Chain.address_to_logs(address_hash, paging_options: paging_options1)
 
-      paging_options2 = %PagingOptions{page_size: 60, key: {transaction.block_number, 51}}
+      paging_options2 = %PagingOptions{page_size: 60, key: {transaction.block_number, transaction.index, log1.index}}
 
-      assert Enum.count(Chain.address_to_logs(address_hash, false, paging_options: paging_options2)) == 50
+      assert Enum.count(Chain.address_to_logs(address_hash, paging_options: paging_options2)) == 50
     end
 
     test "searches logs by topic when the first topic matches" do
@@ -353,7 +345,7 @@ defmodule Explorer.ChainTest do
         block_number: transaction2.block_number
       )
 
-      [found_log] = Chain.address_to_logs(address_hash, false, topic: "test")
+      [found_log] = Chain.address_to_logs(address_hash, topic: "test")
 
       assert found_log.transaction.hash == transaction2.hash
     end
@@ -388,7 +380,7 @@ defmodule Explorer.ChainTest do
         address: address
       )
 
-      [found_log] = Chain.address_to_logs(address_hash, false, topic: "test")
+      [found_log] = Chain.address_to_logs(address_hash, topic: "test")
 
       assert found_log.transaction.hash == transaction1.hash
     end
@@ -593,13 +585,9 @@ defmodule Explorer.ChainTest do
         keys_manager_contract_address: "0x0000000000000000000000000000000000000006"
       )
 
-      consumer_pid = start_supervised!(Explorer.Chain.Fetcher.FetchValidatorInfoOnDemand)
-      :erlang.trace(consumer_pid, true, [:receive])
-
       block = insert(:block)
 
       block_miner_hash_string = Base.encode16(block.miner_hash.bytes, case: :lower)
-      block_miner_hash = block.miner_hash
 
       insert(
         :reward,
@@ -635,10 +623,8 @@ defmodule Explorer.ChainTest do
       )
 
       res = Chain.address_to_transactions_with_rewards(block.miner.hash)
-      assert [{_, _}] = res
 
-      assert_receive {:trace, ^consumer_pid, :receive, {:"$gen_cast", {:fetch_or_update, ^block_miner_hash}}}, 1000
-      :timer.sleep(500)
+      assert [{_, _}] = res
 
       on_exit(fn ->
         Application.put_env(:block_scout_web, BlockScoutWeb.Chain, has_emission_funds: false)
@@ -658,13 +644,9 @@ defmodule Explorer.ChainTest do
         keys_manager_contract_address: "0x0000000000000000000000000000000000000006"
       )
 
-      consumer_pid = start_supervised!(Explorer.Chain.Fetcher.FetchValidatorInfoOnDemand)
-      :erlang.trace(consumer_pid, true, [:receive])
-
       block = insert(:block)
 
       block_miner_hash_string = Base.encode16(block.miner_hash.bytes, case: :lower)
-      block_miner_hash = block.miner_hash
 
       insert(
         :reward,
@@ -705,9 +687,6 @@ defmodule Explorer.ChainTest do
       )
 
       assert [_, {_, _}] = Chain.address_to_transactions_with_rewards(block.miner.hash, direction: :to)
-
-      assert_receive {:trace, ^consumer_pid, :receive, {:"$gen_cast", {:fetch_or_update, ^block_miner_hash}}}, 1000
-      :timer.sleep(500)
 
       on_exit(fn ->
         Application.put_env(:block_scout_web, BlockScoutWeb.Chain, has_emission_funds: false)
@@ -876,7 +855,7 @@ defmodule Explorer.ChainTest do
       |> insert(nonce: 100, from_address: address)
       |> with_block(insert(:block, number: 1000))
 
-      assert Counters.total_transactions_sent_by_address(address.hash) == 101
+      assert Chain.total_transactions_sent_by_address(address.hash) == 101
     end
 
     test "returns 0 when the address did not send transactions" do
@@ -886,7 +865,7 @@ defmodule Explorer.ChainTest do
       |> insert(nonce: 100, to_address: address)
       |> with_block(insert(:block, number: 1000))
 
-      assert Counters.total_transactions_sent_by_address(address.hash) == 0
+      assert Chain.total_transactions_sent_by_address(address.hash) == 0
     end
   end
 
@@ -943,7 +922,7 @@ defmodule Explorer.ChainTest do
 
       assert second_page_hashes ==
                block.hash
-               |> Chain.block_to_transactions(paging_options: %PagingOptions{key: {block.number, index}, page_size: 50})
+               |> Chain.block_to_transactions(paging_options: %PagingOptions{key: {index}, page_size: 50})
                |> Enum.map(& &1.hash)
     end
 
@@ -974,7 +953,7 @@ defmodule Explorer.ChainTest do
   end
 
   describe "block_to_gas_used_by_1559_txs/1" do
-    test "sum of gas_usd from all transactions including legacy" do
+    test "sum of gas_usd from all transactions including glegacy" do
       block = insert(:block, base_fee_per_gas: 4)
 
       insert(:transaction,
@@ -1100,13 +1079,13 @@ defmodule Explorer.ChainTest do
     test "without transactions" do
       %Address{hash: address_hash} = insert(:address)
 
-      assert Counters.address_to_incoming_transaction_count(address_hash) == 0
+      assert Chain.address_to_incoming_transaction_count(address_hash) == 0
     end
 
     test "with transactions" do
       %Transaction{to_address: to_address} = insert(:transaction)
 
-      assert Counters.address_to_incoming_transaction_count(to_address.hash) == 1
+      assert Chain.address_to_incoming_transaction_count(to_address.hash) == 1
     end
   end
 
@@ -1208,13 +1187,7 @@ defmodule Explorer.ChainTest do
     end
   end
 
-  describe "finished_indexing_internal_transactions?/0" do
-    setup do
-      Supervisor.terminate_child(Explorer.Supervisor, PendingBlockOperationCache.child_id())
-      Supervisor.restart_child(Explorer.Supervisor, PendingBlockOperationCache.child_id())
-      on_exit(fn -> Supervisor.terminate_child(Explorer.Supervisor, PendingBlockOperationCache.child_id()) end)
-    end
-
+  describe "finished_internal_transactions_indexing?/0" do
     test "finished indexing" do
       block = insert(:block, number: 1)
 
@@ -1222,11 +1195,11 @@ defmodule Explorer.ChainTest do
       |> insert()
       |> with_block(block)
 
-      assert Chain.finished_indexing_internal_transactions?()
+      assert Chain.finished_internal_transactions_indexing?()
     end
 
     test "finished indexing (no txs)" do
-      assert Chain.finished_indexing_internal_transactions?()
+      assert Chain.finished_internal_transactions_indexing?()
     end
 
     test "not finished indexing" do
@@ -1236,9 +1209,9 @@ defmodule Explorer.ChainTest do
       |> insert()
       |> with_block(block)
 
-      insert(:pending_block_operation, block: block, block_number: block.number)
+      insert(:pending_block_operation, block: block)
 
-      refute Chain.finished_indexing_internal_transactions?()
+      refute Chain.finished_internal_transactions_indexing?()
     end
   end
 
@@ -1497,9 +1470,6 @@ defmodule Explorer.ChainTest do
 
   describe "indexed_ratio_blocks/0" do
     setup do
-      Supervisor.terminate_child(Explorer.Supervisor, Explorer.Chain.Cache.Block.child_id())
-      Supervisor.restart_child(Explorer.Supervisor, Explorer.Chain.Cache.Block.child_id())
-
       on_exit(fn ->
         Application.put_env(:indexer, :first_block, "")
       end)
@@ -1507,10 +1477,8 @@ defmodule Explorer.ChainTest do
 
     test "returns indexed ratio" do
       for index <- 5..9 do
-        insert(:block, number: index, consensus: true)
+        insert(:block, number: index)
       end
-
-      BlockCache.estimated_count()
 
       assert Decimal.compare(Chain.indexed_ratio_blocks(), Decimal.from_float(0.5)) == :eq
     end
@@ -1521,11 +1489,9 @@ defmodule Explorer.ChainTest do
 
     test "returns 1.0 if fully indexed blocks" do
       for index <- 0..9 do
-        insert(:block, number: index, consensus: true)
+        insert(:block, number: index)
         Process.sleep(200)
       end
-
-      BlockCache.estimated_count()
 
       assert Decimal.compare(Chain.indexed_ratio_blocks(), 1) == :eq
     end
@@ -1534,11 +1500,9 @@ defmodule Explorer.ChainTest do
       Application.put_env(:indexer, :first_block, "5")
 
       for index <- 5..9 do
-        insert(:block, number: index, consensus: true)
+        insert(:block, number: index)
         Process.sleep(200)
       end
-
-      BlockCache.estimated_count()
 
       assert Decimal.compare(Chain.indexed_ratio_blocks(), 1) == :eq
     end
@@ -1546,12 +1510,8 @@ defmodule Explorer.ChainTest do
 
   describe "indexed_ratio_internal_transactions/0" do
     setup do
-      Supervisor.terminate_child(Explorer.Supervisor, PendingBlockOperationCache.child_id())
-      Supervisor.restart_child(Explorer.Supervisor, PendingBlockOperationCache.child_id())
-
       on_exit(fn ->
         Application.put_env(:indexer, :trace_first_block, "")
-        Supervisor.terminate_child(Explorer.Supervisor, PendingBlockOperationCache.child_id())
       end)
     end
 
@@ -1560,11 +1520,9 @@ defmodule Explorer.ChainTest do
         block = insert(:block, number: index)
 
         if index === 0 || index === 5 || index === 7 do
-          insert(:pending_block_operation, block: block, block_number: block.number)
+          insert(:pending_block_operation, block: block)
         end
       end
-
-      Chain.indexed_ratio_internal_transactions()
 
       assert Decimal.compare(Chain.indexed_ratio_internal_transactions(), Decimal.from_float(0.7)) == :eq
     end
@@ -2319,7 +2277,7 @@ defmodule Explorer.ChainTest do
                %InternalTransaction{
                  from_address: %Ecto.Association.NotLoaded{},
                  to_address: %Ecto.Association.NotLoaded{},
-                 transaction: %Ecto.Association.NotLoaded{}
+                 transaction: %Transaction{}
                }
                | _
              ] = Chain.address_to_internal_transactions(address_hash)
@@ -2779,7 +2737,7 @@ defmodule Explorer.ChainTest do
                  ])
              )
 
-      assert internal_transaction.block_number == block.number
+      assert internal_transaction.transaction.block_number == block.number
     end
 
     test "with transaction with internal transactions loads associations with in necessity_by_association" do
@@ -2801,7 +2759,7 @@ defmodule Explorer.ChainTest do
                %InternalTransaction{
                  from_address: %Ecto.Association.NotLoaded{},
                  to_address: %Ecto.Association.NotLoaded{},
-                 transaction: %Ecto.Association.NotLoaded{}
+                 transaction: %Transaction{block: %Ecto.Association.NotLoaded{}}
                }
              ] = Chain.transaction_to_internal_transactions(transaction.hash)
 
@@ -3053,7 +3011,7 @@ defmodule Explorer.ChainTest do
                  ])
              )
 
-      assert internal_transaction.block_number == block.number
+      assert internal_transaction.transaction.block_number == block.number
     end
 
     test "with transaction with internal transactions loads associations with in necessity_by_association" do
@@ -3075,7 +3033,7 @@ defmodule Explorer.ChainTest do
                %InternalTransaction{
                  from_address: %Ecto.Association.NotLoaded{},
                  to_address: %Ecto.Association.NotLoaded{},
-                 transaction: %Ecto.Association.NotLoaded{}
+                 transaction: %Transaction{block: %Ecto.Association.NotLoaded{}}
                }
              ] = Chain.all_transaction_to_internal_transactions(transaction.hash)
 
@@ -3277,7 +3235,7 @@ defmodule Explorer.ChainTest do
     test "without logs" do
       transaction = insert(:transaction)
 
-      assert [] = Chain.transaction_to_logs(transaction.hash)
+      assert [] = Chain.transaction_to_logs(transaction.hash, false)
     end
 
     test "with logs" do
@@ -3289,7 +3247,8 @@ defmodule Explorer.ChainTest do
       %Log{transaction_hash: transaction_hash, index: index} =
         insert(:log, transaction: transaction, block: transaction.block, block_number: transaction.block_number)
 
-      assert [%Log{transaction_hash: ^transaction_hash, index: ^index}] = Chain.transaction_to_logs(transaction.hash)
+      assert [%Log{transaction_hash: ^transaction_hash, index: ^index}] =
+               Chain.transaction_to_logs(transaction.hash, false)
     end
 
     test "with logs can be paginated" do
@@ -3320,7 +3279,7 @@ defmodule Explorer.ChainTest do
 
       assert second_page_indexes ==
                transaction.hash
-               |> Chain.transaction_to_logs(paging_options: %PagingOptions{key: {log.index}, page_size: 50})
+               |> Chain.transaction_to_logs(false, paging_options: %PagingOptions{key: {log.index}, page_size: 50})
                |> Enum.map(& &1.index)
     end
 
@@ -3335,6 +3294,7 @@ defmodule Explorer.ChainTest do
       assert [%Log{address: %Address{}, transaction: %Transaction{}}] =
                Chain.transaction_to_logs(
                  transaction.hash,
+                 false,
                  necessity_by_association: %{
                    address: :optional,
                    transaction: :optional
@@ -3346,7 +3306,7 @@ defmodule Explorer.ChainTest do
                  address: %Ecto.Association.NotLoaded{},
                  transaction: %Ecto.Association.NotLoaded{}
                }
-             ] = Chain.transaction_to_logs(transaction.hash)
+             ] = Chain.transaction_to_logs(transaction.hash, false)
     end
   end
 
@@ -4980,6 +4940,41 @@ defmodule Explorer.ChainTest do
     end
   end
 
+  describe "search_token/1" do
+    test "finds by part of the name" do
+      token = insert(:token, name: "magic token", symbol: "MAGIC")
+
+      [result] = Chain.search_token("magic")
+
+      assert result.link == token.contract_address_hash
+    end
+
+    test "finds multiple results in different columns" do
+      insert(:token, name: "magic token", symbol: "TOKEN")
+      insert(:token, name: "token", symbol: "MAGIC")
+
+      result = Chain.search_token("magic")
+
+      assert Enum.count(result) == 2
+    end
+
+    test "do not returns wrong tokens" do
+      insert(:token, name: "token", symbol: "TOKEN")
+
+      result = Chain.search_token("magic")
+
+      assert Enum.empty?(result)
+    end
+
+    test "finds record by the term in the second word" do
+      insert(:token, name: "token magic", symbol: "TOKEN")
+
+      result = Chain.search_token("magic")
+
+      assert Enum.count(result) == 1
+    end
+  end
+
   describe "transaction_has_token_transfers?/1" do
     test "returns true if transaction has token transfers" do
       transaction = insert(:transaction)
@@ -5081,7 +5076,7 @@ defmodule Explorer.ChainTest do
       token_balances =
         address.hash
         |> Chain.fetch_last_token_balances()
-        |> Enum.map(fn token_balance -> token_balance.address_hash end)
+        |> Enum.map(fn {token_balance, _} -> token_balance.address_hash end)
 
       assert token_balances == [current_token_balance.address_hash]
     end
@@ -5110,7 +5105,7 @@ defmodule Explorer.ChainTest do
 
       token_holders_count =
         contract_address_hash
-        |> Chain.fetch_token_holders_from_token_hash([])
+        |> Chain.fetch_token_holders_from_token_hash(false, [])
         |> Enum.count()
 
       assert token_holders_count == 2
@@ -6009,10 +6004,7 @@ defmodule Explorer.ChainTest do
     test "get_implementation_abi_from_proxy/2 returns empty [] abi if proxy abi is null" do
       proxy_contract_address = insert(:contract_address)
 
-      assert Chain.get_implementation_abi_from_proxy(
-               %SmartContract{address_hash: proxy_contract_address.hash, abi: nil},
-               []
-             ) ==
+      assert Chain.get_implementation_abi_from_proxy(%SmartContract{address_hash: proxy_contract_address.hash, abi: nil}) ==
                []
     end
 
@@ -6033,7 +6025,7 @@ defmodule Explorer.ChainTest do
       smart_contract =
         insert(:smart_contract, address_hash: proxy_contract_address.hash, abi: @proxy_abi, contract_code_md5: "123")
 
-      assert Chain.get_implementation_abi_from_proxy(smart_contract, []) == []
+      assert Chain.get_implementation_abi_from_proxy(smart_contract) == []
     end
 
     test "get_implementation_abi_from_proxy/2 returns implementation abi if implementation is verified" do
@@ -6068,7 +6060,7 @@ defmodule Explorer.ChainTest do
         end
       )
 
-      implementation_abi = Chain.get_implementation_abi_from_proxy(smart_contract, [])
+      implementation_abi = Chain.get_implementation_abi_from_proxy(smart_contract)
 
       assert implementation_abi == @implementation_abi
     end
@@ -6107,12 +6099,12 @@ defmodule Explorer.ChainTest do
         end
       )
 
-      implementation_abi = Chain.get_implementation_abi_from_proxy(smart_contract, [])
+      implementation_abi = Chain.get_implementation_abi_from_proxy(smart_contract)
 
       assert implementation_abi == @implementation_abi
     end
 
-    test "get_implementation_abi/1 returns empty [] abi if implementation address is null" do
+    test "get_implementation_abi/1 returns empty [] abi if implmentation address is null" do
       assert Chain.get_implementation_abi(nil) == []
     end
 

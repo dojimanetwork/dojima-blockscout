@@ -4,11 +4,7 @@ defmodule BlockScoutWeb.AddressChannel do
   """
   use BlockScoutWeb, :channel
 
-  import Explorer.Chain.SmartContract, only: [burn_address_hash_string: 0]
-
   alias BlockScoutWeb.API.V2.AddressView, as: AddressViewAPI
-  alias BlockScoutWeb.API.V2.SmartContractView, as: SmartContractViewAPI
-  alias BlockScoutWeb.API.V2.TransactionView, as: TransactionViewAPI
 
   alias BlockScoutWeb.{
     AddressCoinBalanceView,
@@ -20,6 +16,7 @@ defmodule BlockScoutWeb.AddressChannel do
   alias Explorer.{Chain, Market, Repo}
   alias Explorer.Chain.{Hash, Transaction, Wei}
   alias Explorer.Chain.Hash.Address, as: AddressHash
+  alias Explorer.ExchangeRates.Token
   alias Phoenix.View
 
   intercept([
@@ -30,13 +27,11 @@ defmodule BlockScoutWeb.AddressChannel do
     "transaction",
     "verification_result",
     "token_transfer",
-    "pending_transaction",
-    "address_current_token_balances"
+    "pending_transaction"
   ])
 
-  {:ok, burn_address_hash} = Chain.string_to_address_hash(burn_address_hash_string())
+  {:ok, burn_address_hash} = Chain.string_to_address_hash("0x0000000000000000000000000000000000000000")
   @burn_address_hash burn_address_hash
-  @current_token_balances_limit 50
 
   def join("addresses:" <> address_hash, _params, socket) do
     {:ok, %{}, assign(socket, :address_hash, address_hash)}
@@ -46,7 +41,7 @@ defmodule BlockScoutWeb.AddressChannel do
     with {:ok, casted_address_hash} <- AddressHash.cast(socket.assigns.address_hash),
          {:ok, address = %{fetched_coin_balance: balance}} when not is_nil(balance) <-
            Chain.hash_to_address(casted_address_hash),
-         exchange_rate <- Market.get_coin_exchange_rate(),
+         exchange_rate <- Market.get_exchange_rate(Explorer.coin()) || Token.null(),
          {:ok, rendered} <- render_balance_card(address, exchange_rate, socket) do
       reply =
         {:ok,
@@ -97,33 +92,10 @@ defmodule BlockScoutWeb.AddressChannel do
     end
   end
 
-  def handle_out(
-        "verification_result",
-        %{result: result},
-        %Phoenix.Socket{handler: BlockScoutWeb.UserSocketV2} = socket
-      ) do
-    case result do
-      {:ok, _contract} ->
-        push(socket, "verification_result", %{status: "success"})
-        {:noreply, socket}
-
-      {:error, changeset} ->
-        push(socket, "verification_result", %{
-          status: "error",
-          errors: SmartContractViewAPI.render("changeset_errors.json", %{changeset: changeset})
-        })
-
-        {:noreply, socket}
-    end
-  end
-
   def handle_out("verification_result", result, socket) do
     case result[:result] do
       {:ok, _contract} ->
         push(socket, "verification", %{verification_result: :ok})
-        {:noreply, socket}
-
-      {:error, %Ecto.Changeset{}} ->
         {:noreply, socket}
 
       {:error, result} ->
@@ -148,16 +120,10 @@ defmodule BlockScoutWeb.AddressChannel do
 
   def handle_out(
         "internal_transaction",
-        %{address: _address, internal_transaction: internal_transaction},
+        %{address: _address, internal_transaction: _internal_transaction},
         %Phoenix.Socket{handler: BlockScoutWeb.UserSocketV2} = socket
       ) do
-    internal_transaction_json =
-      TransactionViewAPI.render("internal_transaction.json", %{
-        internal_transaction: internal_transaction,
-        conn: nil
-      })
-
-    push(socket, "internal_transaction", %{internal_transaction: internal_transaction_json})
+    push(socket, "internal_transaction", %{internal_transaction: 1})
 
     {:noreply, socket}
   end
@@ -229,34 +195,6 @@ defmodule BlockScoutWeb.AddressChannel do
 
   def handle_out("pending_transaction", data, socket), do: handle_transaction(data, socket, "transaction")
 
-  def handle_out(
-        "address_current_token_balances",
-        %{address_current_token_balances: address_current_token_balances},
-        %Phoenix.Socket{handler: BlockScoutWeb.UserSocketV2} = socket
-      ) do
-    push_current_token_balances(socket, address_current_token_balances, "erc_20", "ERC-20")
-    push_current_token_balances(socket, address_current_token_balances, "erc_721", "ERC-721")
-    push_current_token_balances(socket, address_current_token_balances, "erc_1155", "ERC-1155")
-
-    {:noreply, socket}
-  end
-
-  def handle_out("address_current_token_balances", _, socket) do
-    {:noreply, socket}
-  end
-
-  defp push_current_token_balances(socket, address_current_token_balances, event_postfix, token_type) do
-    filtered_ctbs = address_current_token_balances |> Enum.filter(fn ctb -> ctb.token_type == token_type end)
-
-    push(socket, "updated_token_balances_" <> event_postfix, %{
-      token_balances:
-        AddressViewAPI.render("token_balances.json", %{
-          token_balances: Enum.take(filtered_ctbs, @current_token_balances_limit)
-        }),
-      overflow: Enum.count(filtered_ctbs) > @current_token_balances_limit
-    })
-  end
-
   def push_current_coin_balance(
         %Phoenix.Socket{handler: BlockScoutWeb.UserSocketV2} = socket,
         block_number,
@@ -264,7 +202,7 @@ defmodule BlockScoutWeb.AddressChannel do
       ) do
     push(socket, "current_coin_balance", %{
       coin_balance: (coin_balance && coin_balance.value) || %Wei{value: Decimal.new(0)},
-      exchange_rate: Market.get_coin_exchange_rate().usd_value,
+      exchange_rate: (Market.get_exchange_rate(Explorer.coin()) || Token.null()).usd_value,
       block_number: block_number
     })
   end
@@ -279,7 +217,7 @@ defmodule BlockScoutWeb.AddressChannel do
         conn: socket,
         address: Chain.hash_to_address(hash),
         coin_balance: (coin_balance && coin_balance.value) || %Wei{value: Decimal.new(0)},
-        exchange_rate: Market.get_coin_exchange_rate()
+        exchange_rate: Market.get_exchange_rate(Explorer.coin()) || Token.null()
       )
 
     rendered_link =
@@ -298,23 +236,16 @@ defmodule BlockScoutWeb.AddressChannel do
   end
 
   def handle_transaction(
-        %{transactions: transactions},
+        %{address: _address, transaction: _transaction},
         %Phoenix.Socket{handler: BlockScoutWeb.UserSocketV2} = socket,
         event
-      )
-      when is_list(transactions) do
-    transaction_json = TransactionViewAPI.render("transactions.json", %{transactions: transactions, conn: nil})
-
-    push(socket, event, %{transactions: transaction_json})
+      ) do
+    push(socket, event, %{transaction: 1})
 
     {:noreply, socket}
   end
 
-  def handle_transaction(
-        %{address: address, transaction: transaction},
-        %Phoenix.Socket{handler: BlockScoutWeb.UserSocket} = socket,
-        event
-      ) do
+  def handle_transaction(%{address: address, transaction: transaction}, socket, event) do
     Gettext.put_locale(BlockScoutWeb.Gettext, socket.assigns.locale)
 
     rendered =
@@ -337,29 +268,17 @@ defmodule BlockScoutWeb.AddressChannel do
     {:noreply, socket}
   end
 
-  def handle_transaction(_, socket, _event) do
-    {:noreply, socket}
-  end
-
   def handle_token_transfer(
-        %{token_transfers: token_transfers},
+        %{address: _address, token_transfer: _token_transfer},
         %Phoenix.Socket{handler: BlockScoutWeb.UserSocketV2} = socket,
         event
-      )
-      when is_list(token_transfers) do
-    token_transfer_json =
-      TransactionViewAPI.render("token_transfers.json", %{token_transfers: token_transfers, conn: nil})
-
-    push(socket, event, %{token_transfers: token_transfer_json})
+      ) do
+    push(socket, event, %{token_transfer: 1})
 
     {:noreply, socket}
   end
 
-  def handle_token_transfer(
-        %{address: address, token_transfer: token_transfer},
-        %Phoenix.Socket{handler: BlockScoutWeb.UserSocket} = socket,
-        event
-      ) do
+  def handle_token_transfer(%{address: address, token_transfer: token_transfer}, socket, event) do
     Gettext.put_locale(BlockScoutWeb.Gettext, socket.assigns.locale)
 
     transaction =
@@ -390,10 +309,6 @@ defmodule BlockScoutWeb.AddressChannel do
       token_transfer_html: rendered
     })
 
-    {:noreply, socket}
-  end
-
-  def handle_token_transfer(_, socket, _event) do
     {:noreply, socket}
   end
 

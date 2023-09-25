@@ -162,6 +162,9 @@ defmodule BlockScoutWeb.AddressTransactionControllerTest do
 
   describe "GET token-transfers-csv/2" do
     test "do not export token transfers to csv without recaptcha recaptcha_response provided", %{conn: conn} do
+      BlockScoutWeb.TestCaptchaHelper
+      |> expect(:recaptcha_passed?, fn _captcha_response -> false end)
+
       address = insert(:address)
 
       transaction =
@@ -176,7 +179,7 @@ defmodule BlockScoutWeb.AddressTransactionControllerTest do
       to_period = Timex.format!(Timex.now(), "%Y-%m-%d", :strftime)
 
       conn =
-        get(conn, "/api/v1/token-transfers-csv", %{
+        get(conn, "/token-transfers-csv", %{
           "address_id" => Address.checksum(address.hash),
           "from_period" => from_period,
           "to_period" => to_period
@@ -203,7 +206,7 @@ defmodule BlockScoutWeb.AddressTransactionControllerTest do
       to_period = Timex.format!(Timex.now(), "%Y-%m-%d", :strftime)
 
       conn =
-        get(conn, "/api/v1/token-transfers-csv", %{
+        get(conn, "/token-transfers-csv", %{
           "address_id" => Address.checksum(address.hash),
           "from_period" => from_period,
           "to_period" => to_period,
@@ -211,35 +214,6 @@ defmodule BlockScoutWeb.AddressTransactionControllerTest do
         })
 
       assert conn.status == 404
-    end
-
-    test "exports token transfers to csv without recaptcha if recaptcha is disabled", %{conn: conn} do
-      init_config = Application.get_env(:block_scout_web, :recaptcha)
-      Application.put_env(:block_scout_web, :recaptcha, is_disabled: true)
-
-      address = insert(:address)
-
-      transaction =
-        :transaction
-        |> insert(from_address: address)
-        |> with_block()
-
-      insert(:token_transfer, transaction: transaction, from_address: address, block_number: transaction.block_number)
-      insert(:token_transfer, transaction: transaction, to_address: address, block_number: transaction.block_number)
-
-      from_period = Timex.format!(Timex.shift(Timex.now(), minutes: -1), "%Y-%m-%d", :strftime)
-      to_period = Timex.format!(Timex.now(), "%Y-%m-%d", :strftime)
-
-      conn =
-        get(conn, "/api/v1/token-transfers-csv", %{
-          "address_id" => Address.checksum(address.hash),
-          "from_period" => from_period,
-          "to_period" => to_period
-        })
-
-      assert conn.resp_body |> String.split("\n") |> Enum.count() == 4
-
-      Application.put_env(:block_scout_web, :recaptcha, init_config)
     end
 
     test "exports token transfers to csv", %{conn: conn} do
@@ -260,7 +234,7 @@ defmodule BlockScoutWeb.AddressTransactionControllerTest do
       to_period = Timex.format!(Timex.now(), "%Y-%m-%d", :strftime)
 
       conn =
-        get(conn, "/api/v1/token-transfers-csv", %{
+        get(conn, "/token-transfers-csv", %{
           "address_id" => Address.checksum(address.hash),
           "from_period" => from_period,
           "to_period" => to_period,
@@ -290,7 +264,7 @@ defmodule BlockScoutWeb.AddressTransactionControllerTest do
       to_period = Timex.format!(Timex.now(), "%Y-%m-%d", :strftime)
 
       conn =
-        get(conn, "/api/v1/transactions-csv", %{
+        get(conn, "/transactions-csv", %{
           "address_id" => Address.checksum(address.hash),
           "from_period" => from_period,
           "to_period" => to_period,
@@ -357,7 +331,7 @@ defmodule BlockScoutWeb.AddressTransactionControllerTest do
       to_period = Timex.format!(Timex.now(), "%Y-%m-%d", :strftime)
 
       conn =
-        get(conn, "/api/v1/internal-transactions-csv", %{
+        get(conn, "/internal-transactions-csv", %{
           "address_id" => Address.checksum(address.hash),
           "from_period" => from_period,
           "to_period" => to_period,
@@ -418,7 +392,7 @@ defmodule BlockScoutWeb.AddressTransactionControllerTest do
       to_period = Timex.format!(Timex.now(), "%Y-%m-%d", :strftime)
 
       conn =
-        get(conn, "/api/v1/logs-csv", %{
+        get(conn, "/logs-csv", %{
           "address_id" => Address.checksum(address.hash),
           "from_period" => from_period,
           "to_period" => to_period,

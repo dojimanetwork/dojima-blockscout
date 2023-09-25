@@ -57,12 +57,7 @@ config :logger, :block_scout_web,
 config :logger, :api,
   level: :debug,
   path: Path.absname("logs/dev/api.log"),
-  metadata_filter: [application: :api]
-
-config :logger, :api_v2,
-  level: :debug,
-  path: Path.absname("logs/dev/api_v2.log"),
-  metadata_filter: [application: :api_v2]
+  metadata_filter: [fetcher: :api]
 
 # Set a higher stacktrace during development. Avoid configuring such
 # in production as building large stacktraces may be expensive.

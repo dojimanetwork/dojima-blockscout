@@ -8,10 +8,10 @@ defmodule BlockScoutWeb.API.V2.StatsControllerTest do
       start_supervised!(AddressesCounter)
       start_supervised!(AverageBlockTime)
 
-      Application.put_env(:explorer, AverageBlockTime, enabled: true, cache_period: 1_800_000)
+      Application.put_env(:explorer, AverageBlockTime, enabled: true)
 
       on_exit(fn ->
-        Application.put_env(:explorer, AverageBlockTime, enabled: false, cache_period: 1_800_000)
+        Application.put_env(:explorer, AverageBlockTime, enabled: false)
       end)
 
       :ok
@@ -42,6 +42,7 @@ defmodule BlockScoutWeb.API.V2.StatsControllerTest do
       assert response = json_response(request, 200)
 
       assert response["chart_data"] == []
+      assert response["available_supply"] == 0
     end
   end
 

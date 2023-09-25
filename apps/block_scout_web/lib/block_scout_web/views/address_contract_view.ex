@@ -35,10 +35,7 @@ defmodule BlockScoutWeb.AddressContractView do
       |> Enum.reduce({0, "#{contract.constructor_arguments}\n\n"}, fn {val, %{"type" => type}}, {count, acc} ->
         formatted_val = val_to_string(val, type, conn)
 
-        {count + 1,
-         ~E"""
-         <%= acc %>Arg [<%= count %>] (<b><%= type %></b>) : <%= formatted_val %>
-         """}
+        {count + 1, "#{acc}Arg [#{count}] (<b>#{type}</b>) : #{formatted_val}\n"}
       end)
 
     result
@@ -49,7 +46,12 @@ defmodule BlockScoutWeb.AddressContractView do
   defp val_to_string(val, type, conn) do
     cond do
       type =~ "[]" ->
-        val_to_string_if_array(val, type, conn)
+        if is_list(val) or is_tuple(val) do
+          "[" <>
+            Enum.map_join(val, ", ", fn el -> val_to_string(el, String.replace_suffix(type, "[]", ""), conn) end) <> "]"
+        else
+          to_string(val)
+        end
 
       type =~ "address" ->
         address_hash = "0x" <> Base.encode16(val, case: :lower)
@@ -66,15 +68,6 @@ defmodule BlockScoutWeb.AddressContractView do
     end
   end
 
-  defp val_to_string_if_array(val, type, conn) do
-    if is_list(val) or is_tuple(val) do
-      "[" <>
-        Enum.map_join(val, ", ", fn el -> val_to_string(el, String.replace_suffix(type, "[]", ""), conn) end) <> "]"
-    else
-      to_string(val)
-    end
-  end
-
   defp get_address(address_hash) do
     case Chain.string_to_address_hash(address_hash) do
       {:ok, address} -> address
@@ -84,17 +77,17 @@ defmodule BlockScoutWeb.AddressContractView do
 
   defp get_formatted_address_data(address, address_hash, conn) do
     if address != nil do
-      ~E"<a href=<%= address_path(conn, :show, address) %>><%= address_hash %></a>"
+      "<a href=" <> address_path(conn, :show, address) <> ">" <> address_hash <> "</a>"
     else
       address_hash
     end
   end
 
-  def decode_data("0x" <> encoded_data, types) do
+  defp decode_data("0x" <> encoded_data, types) do
     decode_data(encoded_data, types)
   end
 
-  def decode_data(encoded_data, types) do
+  defp decode_data(encoded_data, types) do
     encoded_data
     |> Base.decode16!(case: :mixed)
     |> TypeDecoder.decode_raw(types)
@@ -103,10 +96,25 @@ defmodule BlockScoutWeb.AddressContractView do
   def format_external_libraries(libraries, conn) do
     Enum.reduce(libraries, "", fn %{name: name, address_hash: address_hash}, acc ->
       address = get_address(address_hash)
+      "#{acc}<span class=\"hljs-title\">#{name}</span> : #{get_formatted_address_data(address, address_hash, conn)}  \n"
+    end)
+  end
 
-      ~E"""
-      <%= acc %><span class="hljs-title"><%= name %></span> : <%= get_formatted_address_data(address, address_hash, conn) %>
-      """
+  def contract_lines_with_index(source_code) do
+    contract_lines =
+      source_code
+      |> String.split("\n")
+
+    max_digits =
+      contract_lines
+      |> Enum.count()
+      |> Integer.digits()
+      |> Enum.count()
+
+    contract_lines
+    |> Enum.with_index(1)
+    |> Enum.map(fn {value, line} ->
+      {value, String.pad_leading(to_string(line), max_digits, " ")}
     end)
   end
 

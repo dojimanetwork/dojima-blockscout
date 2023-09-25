@@ -35,7 +35,7 @@ defmodule BlockScoutWeb.TransactionViewTest do
       assert pending.inserted_at == TransactionView.block_timestamp(pending)
     end
 
-    test "returns timestamp for block for collated transaction" do
+    test "returns timestamp for block for collacted transaction" do
       block = insert(:block)
 
       transaction =
@@ -192,7 +192,7 @@ defmodule BlockScoutWeb.TransactionViewTest do
         |> insert()
         |> with_block(block, status: :error)
 
-      insert(:pending_block_operation, block_hash: block.hash, block_number: block.number)
+      insert(:pending_block_operation, block_hash: block.hash)
 
       status = TransactionView.transaction_status(transaction)
       assert TransactionView.formatted_result(status) == "Error: (Awaiting internal transactions for reason)"

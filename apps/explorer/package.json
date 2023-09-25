@@ -8,11 +8,11 @@
   "author": "Blockscout",
   "license": "GPL-3.0",
   "engines": {
-    "node": "18.x",
+    "node": "16.x",
     "npm": "8.x"
   },
   "scripts": {},
   "dependencies": {
-    "solc": "0.8.21"
+    "solc": "0.8.16"
   }
 }

@@ -40,7 +40,6 @@ export function reducer (state = initialState, action) {
 const elements = {
   '[data-selector="channel-disconnected-message"]': {
     render ($el, state) {
-      // @ts-ignore
       if (state.channelDisconnected && !window.loading) $el.show()
     }
   },
@@ -67,27 +66,24 @@ const $contractVerificationChooseTypePage = $('[data-page="contract-verification
 
 function filterNightlyBuilds (filter, selectFirstNonNightly_) {
   const select = document.getElementById('smart_contract_compiler_version')
-  const options = select && select.getElementsByTagName('option')
+  const options = select.getElementsByTagName('option')
   let selectFirstNonNightly = selectFirstNonNightly_
 
-  if (options) {
-    for (const option of options) {
-      const txtValue = option.textContent || option.innerText
-      if (filter) {
-        if (txtValue.toLowerCase().indexOf('nightly') > -1) {
-          option.style.display = 'none'
-        } else {
-          if (selectFirstNonNightly) {
-            // @ts-ignore
-            option.selected = 'selected'
-            selectFirstNonNightly = false
-          }
-          option.style.display = ''
-        }
+  for (const option of options) {
+    const txtValue = option.textContent || option.innerText
+    if (filter) {
+      if (txtValue.toLowerCase().indexOf('nightly') > -1) {
+        option.style.display = 'none'
       } else {
-        if (txtValue.toLowerCase().indexOf('nightly') > -1) {
-          option.style.display = ''
+        if (selectFirstNonNightly) {
+          option.selected = 'selected'
+          selectFirstNonNightly = false
         }
+        option.style.display = ''
+      }
+    } else {
+      if (txtValue.toLowerCase().indexOf('nightly') > -1) {
+        option.style.display = ''
       }
     }
   }
@@ -97,7 +93,6 @@ let dropzone
 
 if ($contractVerificationPage.length) {
   window.onbeforeunload = () => {
-    // @ts-ignore
     window.loading = true
   }
 
@@ -127,7 +122,9 @@ if ($contractVerificationPage.length) {
   $(function () {
     initializeDropzone()
 
-    filterNightlyBuilds(true, false)
+    setTimeout(function () {
+      $('.nightly-builds-false').trigger('click')
+    }, 10)
 
     $('body').on('click', '.js-btn-add-contract-libraries', function () {
       $('.js-smart-contract-libraries-wrapper').show()
@@ -191,7 +188,6 @@ if ($contractVerificationPage.length) {
       // submit form without page updating in order to avoid websocket reconnecting
       event.preventDefault()
       const $form = $('form')[0]
-      // @ts-ignore
       $.post($form.action, convertFormToJSON($form))
     })
 

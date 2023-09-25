@@ -2,8 +2,6 @@ defmodule Explorer.ExchangeRates.Source do
   @moduledoc """
   Behaviour for fetching exchange rates from external sources.
   """
-
-  alias Explorer.Chain.Hash
   alias Explorer.ExchangeRates.Source.CoinGecko
   alias Explorer.ExchangeRates.Token
   alias HTTPoison.{Error, Response}
@@ -31,42 +29,21 @@ defmodule Explorer.ExchangeRates.Source do
     fetch_exchange_rates_request(CoinGecko, source_url, headers)
   end
 
-  @spec fetch_market_data_for_token_addresses([Hash.Address.t()]) ::
-          {:ok, %{Hash.Address.t() => %{fiat_value: float() | nil, circulating_market_cap: float() | nil}}}
-          | {:error, any}
-  def fetch_market_data_for_token_addresses(address_hashes) do
-    source_url = CoinGecko.source_url(address_hashes)
-    headers = CoinGecko.headers()
-    fetch_exchange_rates_request(CoinGecko, source_url, headers)
-  end
-
-  @spec fetch_token_hashes_with_market_data :: {:ok, [String.t()]} | {:error, any}
-  def fetch_token_hashes_with_market_data do
-    source_url = CoinGecko.source_url(:coins_list)
-    headers = CoinGecko.headers()
-
-    case http_request(source_url, headers) do
-      {:ok, result} ->
-        {:ok,
-         result
-         |> CoinGecko.format_data()}
-
-      resp ->
-        resp
-    end
-  end
-
   defp fetch_exchange_rates_request(_source, source_url, _headers) when is_nil(source_url),
     do: {:error, "Source URL is nil"}
 
   defp fetch_exchange_rates_request(source, source_url, headers) do
     case http_request(source_url, headers) do
-      {:ok, result} when is_map(result) ->
-        result_formatted =
-          result
-          |> source.format_data()
+      {:ok, result} = resp ->
+        if is_map(result) do
+          result_formatted =
+            result
+            |> source.format_data()
 
-        {:ok, result_formatted}
+          {:ok, result_formatted}
+        else
+          resp
+        end
 
       resp ->
         resp
@@ -76,7 +53,7 @@ defmodule Explorer.ExchangeRates.Source do
   @doc """
   Callback for api's to format the data returned by their query.
   """
-  @callback format_data(map() | list()) :: [any]
+  @callback format_data(String.t()) :: [any]
 
   @doc """
   Url for the api to query to get the market info.

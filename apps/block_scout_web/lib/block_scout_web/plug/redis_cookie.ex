@@ -72,7 +72,7 @@ defmodule BlockScoutWeb.Plug.RedisCookie do
          Logger.log(
            log,
            "Plug.Session could not decode incoming session cookie. Reason: " <>
-             Exception.format(:error, e, __STACKTRACE__)
+             Exception.message(e)
          )
 
          %{}
@@ -192,7 +192,7 @@ defmodule BlockScoutWeb.Plug.RedisCookie do
   defp build_rotating_opts(opts, _), do: Map.put(opts, :rotating_options, [])
 
   defp store_to_redis(cookie) do
-    Redix.command(:redix, ["SET", hash(cookie), 1, "EX", Application.get_env(:block_scout_web, :session_cookie_ttl)])
+    Redix.command(:redix, ["SET", hash(cookie), 1])
 
     cookie
   end

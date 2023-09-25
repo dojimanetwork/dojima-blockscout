@@ -3,9 +3,8 @@ defmodule Explorer.Tags.AddressTag.Cataloger do
   Actualizes address tags.
   """
 
-  use GenServer, restart: :transient
+  use GenServer
 
-  alias Explorer.Chain.Fetcher.FetchValidatorInfoOnDemand
   alias Explorer.EnvVarTranslator
   alias Explorer.Tags.{AddressTag, AddressToTag}
   alias Explorer.Validator.MetadataRetriever
@@ -58,7 +57,7 @@ defmodule Explorer.Tags.AddressTag.Cataloger do
       end
     end)
 
-    {:stop, :normal, state}
+    {:noreply, state}
   end
 
   defp tag_name_to_env_var_part(tag_name) do
@@ -151,7 +150,6 @@ defmodule Explorer.Tags.AddressTag.Cataloger do
 
   defp set_validator_tag do
     validators = MetadataRetriever.fetch_validators_list()
-    FetchValidatorInfoOnDemand.trigger_fetch(validators)
     tag_id = AddressTag.get_tag_id("validator")
     AddressToTag.set_tag_to_addresses(tag_id, validators)
   end

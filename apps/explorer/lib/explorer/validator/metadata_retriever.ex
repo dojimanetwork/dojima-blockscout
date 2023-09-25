@@ -1,6 +1,6 @@
 defmodule Explorer.Validator.MetadataRetriever do
   @moduledoc """
-  Consults the configured smart contracts to fetch the validators' metadata
+  Consults the configured smart contracts to fetch the valivators' metadata
   """
 
   alias Explorer.SmartContract.Reader
@@ -55,7 +55,7 @@ defmodule Explorer.Validator.MetadataRetriever do
          expiration_date,
          created_date,
          _updated_date,
-         _min_threshold
+         _min_treshold
        ]) do
     %{
       name: trim_null_bytes(first_name) <> " " <> trim_null_bytes(last_name),

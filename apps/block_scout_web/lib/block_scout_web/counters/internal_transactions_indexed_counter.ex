@@ -36,9 +36,11 @@ defmodule BlockScoutWeb.Counters.InternalTransactionsIndexedCounter do
   end
 
   def calculate_internal_transactions_indexed do
-    ratio = Chain.indexed_ratio_internal_transactions()
+    indexed_ratio_internal_transactions = Chain.indexed_ratio_internal_transactions()
 
-    Notifier.broadcast_indexed_ratio("blocks:indexing_internal_transactions", ratio)
+    finished? = Chain.finished_indexing?(indexed_ratio_internal_transactions)
+
+    Notifier.broadcast_internal_transactions_indexed_ratio(indexed_ratio_internal_transactions, finished?)
   end
 
   defp schedule_next_consolidation do

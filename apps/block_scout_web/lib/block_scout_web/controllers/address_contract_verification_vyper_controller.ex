@@ -48,4 +48,11 @@ defmodule BlockScoutWeb.AddressContractVerificationVyperController do
 
     send_resp(conn, 204, "")
   end
+
+  def parse_optimization_runs(%{"runs" => runs}) do
+    case Integer.parse(runs) do
+      {integer, ""} -> integer
+      _ -> 200
+    end
+  end
 end
